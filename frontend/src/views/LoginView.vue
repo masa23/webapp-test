@@ -34,12 +34,12 @@ const login = async () => {
           <label for="username">Username</label>
           <input type="text" id="username" v-model="username" required />
         </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" v-model="password" required />
+        </div>
+        <button type="submit" @click="login">Login</button>
       </form>
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" v-model="password" required />
-      </div>
-      <button type="submit" @click="login">Login</button>
       <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
       <p v-if="successMessage" class="success">{{ successMessage }}</p>
     </div>

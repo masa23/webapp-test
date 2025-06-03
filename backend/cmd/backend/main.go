@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -8,14 +10,15 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/masa23/webapp-test/auth"
+	"github.com/masa23/webapp-test/config"
 	"github.com/masa23/webapp-test/model"
 	"github.com/masa23/webapp-test/server"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-var jwtSecret = []byte("secret")
 var db *gorm.DB
+var conf *config.Config
 
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -23,7 +26,7 @@ type LoginRequest struct {
 }
 
 func loginHandler(c echo.Context) error {
-	return auth.Login(c, db, jwtSecret)
+	return auth.Login(c, db, []byte(conf.JWTSecret))
 }
 
 func helloWorldHandler(c echo.Context) error {
@@ -295,6 +298,16 @@ func postServerPowerForceOffHandler(c echo.Context) error {
 }
 
 func main() {
+	var err error
+	var confPath string
+	flag.StringVar(&confPath, "config", "config.yaml", "Path to the configuration file")
+	flag.Parse()
+
+	conf, err = config.Load(confPath)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
 	e := echo.New()
 
 	// middleware
@@ -307,7 +320,6 @@ func main() {
 	}))
 
 	// DB接続の初期化
-	var err error
 	db, err = gorm.Open(sqlite.Open("test.sqlite3"), &gorm.Config{})
 	if err != nil {
 		e.Logger.Fatal("Failed to connect to database:", err)
@@ -325,7 +337,7 @@ func main() {
 	// jwt認証ミドルウェアを適用
 	api.Use(echojwt.WithConfig(echojwt.Config{
 		NewClaimsFunc: auth.NewJWTClaims,
-		SigningKey:    jwtSecret,
+		SigningKey:    []byte(conf.JWTSecret),
 	}))
 
 	api.GET("/profile", profileHandler)

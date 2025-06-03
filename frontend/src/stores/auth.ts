@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import axios from 'axios'
+import router from '@/router'
 
 export const useAuth = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('token'))

@@ -20,7 +20,7 @@ type Server = {
 
 type ServerWithStatus = Server & { status?: string };
 
-const servers = ref < ServerWithStatus[] > ([])
+const servers = ref<ServerWithStatus[]>([])
 const totalCount = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
@@ -46,6 +46,11 @@ const fetchServers = async () => {
     )
     servers.value = withStatus
   } catch (err) {
+    if (axios.isAxiosError(err) && err.response && err.response.status === 401) {
+      console.log('Unauthorized access, logging out...')
+      auth.logout()
+      return
+    }
     console.error('Error fetching servers:', err)
   }
 }
@@ -54,6 +59,10 @@ const fetchServerById = async (id: number) => {
   const res = await axios.get(`/api/server/${id}`, {
     headers: { 'Authorization': `Bearer ${auth.token}` }
   })
+  if (res.status === 401) {
+    auth.logout()
+    return
+  }
   return res.data
 }
 
@@ -107,7 +116,8 @@ onMounted(() => fetchServers())
     <h2>Server List</h2>
     <ul>
       <li v-for="server in servers" :key="server.id">
-        <strong>{{ server.name }}</strong> ({{ server.host_name }}) - Status: {{ server.status }} <button @click="postServerPowerOn(server.id)">Power On</button>
+        <strong>{{ server.name }}</strong> ({{ server.host_name }}) - Status: {{ server.status }} <button
+          @click="postServerPowerOn(server.id)">Power On</button>
         <button @click="postServerPowerOff(server.id)">Power Off</button>
         <button @click="postServerPowerReboot(server.id)">Reboot</button>
         <button @click="postServerPowerForceReboot(server.id)">Force Reboot</button>

@@ -3,9 +3,12 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/websocket"
+	"github.com/k0kubun/pp/v3"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -19,6 +22,10 @@ import (
 
 var db *gorm.DB
 var conf *config.Config
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
 
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -297,6 +304,89 @@ func postServerPowerForceOffHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"message": "Server force powered off successfully"})
 }
 
+func getServerVNCHandler(c echo.Context) error {
+	token := c.QueryParam("token")
+
+	c.Logger().Debug("getServerVNCHandler called")
+	pp.Println("getServerVNCHandler token:", token)
+
+	if token == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Token is required")
+	}
+	userId, err := auth.JWTTokenAuth(token, conf.JWTSecret)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
+	}
+
+	serverIdStr := c.Param("id")
+	if serverIdStr == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
+	}
+
+	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
+	}
+
+	var sv model.Server
+	if err := db.First(&sv, serverId).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
+	}
+
+	var user model.User
+	if err := db.First(&user, *userId).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "User not found")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
+	}
+
+	if sv.OrganizationID != user.OrganizationID {
+		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to access this server's VNC")
+	}
+
+	port, err := server.ServerDomDisplay(sv)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get VNC port")
+	}
+
+	vncConn, err := net.Dial("tcp", ""+sv.HostName+":"+strconv.Itoa(port))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to connect to VNC server")
+	}
+	defer vncConn.Close()
+
+	wsConn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to upgrade connection to WebSocket")
+	}
+
+	// WebSocket → VNC
+	go func() {
+		for {
+			mt, msg, err := wsConn.ReadMessage()
+			if err != nil || mt != websocket.BinaryMessage {
+				break
+			}
+			vncConn.Write(msg)
+		}
+	}()
+
+	// VNC → WebSocket
+	buf := make([]byte, 1024)
+	for {
+		n, err := vncConn.Read(buf)
+		if err != nil {
+			break
+		}
+		wsConn.WriteMessage(websocket.BinaryMessage, buf[:n])
+	}
+	return nil
+}
+
 func main() {
 	var err error
 	var confPath string
@@ -331,6 +421,7 @@ func main() {
 
 	e.POST("/login", loginHandler)
 	e.GET("/", helloWorldHandler)
+	e.GET("/ws/server/:id/vnc", getServerVNCHandler)
 
 	// JWTが必要なグループ
 	api := e.Group("/api")

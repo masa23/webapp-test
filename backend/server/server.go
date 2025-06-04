@@ -3,6 +3,8 @@ package server
 import (
 	"log"
 	"os/exec"
+	"strconv"
+	"strings"
 
 	"github.com/k0kubun/pp/v3"
 	"github.com/masa23/webapp-test/libvirt"
@@ -137,4 +139,32 @@ func ServerForcePowerOff(server model.Server) error {
 		return err
 	}
 	return nil
+}
+
+func ServerDomDisplay(server model.Server) (port int, err error) {
+	// ホストサーバにSSHを行ってvirsh domdisplayを実行する
+	out, err := execSSHCommand(server.HostName, "virsh domdisplay "+server.Name)
+	if err != nil {
+		log.Println("Error displaying server:", err)
+		return 0, err
+	}
+
+	// vnc://127.0.0.1:5900のような形式で出力されるので、ポート番号を抽出
+	s := strings.Split(string(out), ":")
+	if len(s) < 3 {
+		log.Println("Invalid display output:", string(out))
+		return 0, err
+	}
+	// ポート番号を整数に変換
+	portNum := strings.TrimSpace(s[3])
+	if portNum == "" {
+		log.Println("Port number is empty")
+		return 0, err
+	}
+	portInt, err := strconv.Atoi(portNum)
+	if err != nil {
+		log.Println("Error converting port number:", err)
+		return 0, err
+	}
+	return portInt + 5900, nil
 }

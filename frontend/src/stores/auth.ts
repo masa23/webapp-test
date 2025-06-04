@@ -1,9 +1,11 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
-import router from '@/router'
+
 
 export const useAuth = defineStore('auth', () => {
+  const router = useRouter()
   const token = ref<string | null>(localStorage.getItem('token'))
   const username = ref<string | null>(null)
 
@@ -21,8 +23,10 @@ export const useAuth = defineStore('auth', () => {
       }
       localStorage.setItem('token', token.value)
       await fetchProfile()
+      router.push('/')
     } catch (err) {
-      throw new Error('ログイン失敗')
+      const error = err as any
+      throw new Error(error.response?.data?.message || 'ログイン失敗')
     }
   }
 
@@ -44,6 +48,7 @@ export const useAuth = defineStore('auth', () => {
     token.value = null
     username.value = null
     localStorage.removeItem('token')
+    router.push('/login')
   }
 
   return {

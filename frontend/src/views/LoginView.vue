@@ -25,23 +25,31 @@ const login = async () => {
 </script>
 
 <template>
-  <main>
-    <!-- Login Form -->
-    <div class="login-container">
-      <h1>Login</h1>
+  <main class="min-h-screen flex justify-center bg-gray-100 pt-24">
+    <div class="bg-white shadow-lg rounded-xl p-8 w-[300px]">
+      <h1 class="text-2xl font-bold text-center mb-6 text-gray-800">Login</h1>
+
       <form @submit.prevent>
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input type="text" id="username" v-model="username" required />
+        <div class="mb-4">
+          <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+          <input type="text" id="username" v-model="username" required
+            class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" />
         </div>
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" v-model="password" required />
+
+        <div class="mb-4">
+          <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+          <input type="password" id="password" v-model="password" required
+            class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" />
         </div>
-        <button type="submit" @click="login">Login</button>
+
+        <button type="submit" @click="login"
+          class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition">
+          Login
+        </button>
       </form>
-      <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
-      <p v-if="successMessage" class="success">{{ successMessage }}</p>
+
+      <p v-if="errorMessage" class="mt-4 text-sm text-red-600">{{ errorMessage }}</p>
+      <p v-if="successMessage" class="mt-4 text-sm text-green-600">{{ successMessage }}</p>
     </div>
   </main>
 </template>

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +41,36 @@ func JWTAuth(c echo.Context) (userId *uint64, err error) {
 	if claims.Subject == "" {
 		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
 	}
+	// ユーザーIDを取得
+	userIdUint, err := strconv.ParseUint(claims.Subject, 10, 64)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+	}
+	return &userIdUint, nil
+}
+
+func JWTTokenAuth(token string, jwtSecret string) (userId *uint64, err error) {
+	t, err := jwt.ParseWithClaims(token, &jwtCustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// 署名方法の検証
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+	}
+
+	// クレームを取得
+	claims, ok := t.Claims.(*jwtCustomClaims)
+	if !ok || !t.Valid {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+	}
+
+	if claims.Subject == "" {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+	}
+
 	// ユーザーIDを取得
 	userIdUint, err := strconv.ParseUint(claims.Subject, 10, 64)
 	if err != nil {

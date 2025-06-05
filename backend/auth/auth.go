@@ -27,56 +27,39 @@ func NewJWTClaims(c echo.Context) jwt.Claims {
 	return new(jwtCustomClaims)
 }
 
-// JWTでの認証を行う
-// Authorization: Bearer <token>
-func JWTAuth(c echo.Context) (userId *uint64, err error) {
+// JWT: Context からユーザーIDを取得
+func JWTAuth(c echo.Context) (*uint64, error) {
 	token, ok := c.Get("user").(*jwt.Token)
 	if !ok {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+		return nil, unauthorized()
 	}
-	claims, ok := token.Claims.(*jwtCustomClaims)
-	if !ok {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
-	}
-	if claims.Subject == "" {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
-	}
-	// ユーザーIDを取得
-	userIdUint, err := strconv.ParseUint(claims.Subject, 10, 64)
-	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
-	}
-	return &userIdUint, nil
+	return extractUserIDFromClaims(token.Claims)
 }
 
-func JWTTokenAuth(token string, jwtSecret string) (userId *uint64, err error) {
-	t, err := jwt.ParseWithClaims(token, &jwtCustomClaims{}, func(token *jwt.Token) (interface{}, error) {
-		// 署名方法の検証
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+// JWT: トークンとシークレットからユーザーIDを取得
+func JWTTokenAuth(tokenStr, jwtSecret string) (*uint64, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &jwtCustomClaims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(jwtSecret), nil
 	})
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+		return nil, unauthorized()
 	}
+	return extractUserIDFromClaims(token.Claims)
+}
 
-	// クレームを取得
-	claims, ok := t.Claims.(*jwtCustomClaims)
-	if !ok || !t.Valid {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+func extractUserIDFromClaims(claims jwt.Claims) (*uint64, error) {
+	c, ok := claims.(*jwtCustomClaims)
+	if !ok || c.Subject == "" {
+		return nil, unauthorized()
 	}
-
-	if claims.Subject == "" {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
-	}
-
-	// ユーザーIDを取得
-	userIdUint, err := strconv.ParseUint(claims.Subject, 10, 64)
+	id, err := strconv.ParseUint(c.Subject, 10, 64)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid JWT token")
+		return nil, unauthorized()
 	}
-	return &userIdUint, nil
+	return &id, nil
 }
 
 type LoginRequest struct {
@@ -84,108 +67,118 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// login処理をする JWTトークンを生成して返す
+// ログインしてJWTを返す
 func Login(c echo.Context, db *gorm.DB, jwtSecret []byte) error {
-	var loginReq LoginRequest
-	if err := c.Bind(&loginReq); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request format")
+	var req LoginRequest
+	if err := c.Bind(&req); err != nil {
+		return badRequest("Invalid request format")
 	}
 
-	// ユーザー名とパスワードでユーザーを検索
-	var user model.User
-	if err := db.Where("username = ?", loginReq.Username).First(&user).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid username or password")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
-	}
-
-	// パスワードをハッシュ化して比較
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginReq.Password)); err != nil {
-		if err == bcrypt.ErrMismatchedHashAndPassword {
-			return echo.NewHTTPError(http.StatusUnauthorized, "Invalid username or password")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Error comparing password")
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwtCustomClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)), // トークンの有効期限を1時間に設定
-			Subject:   strconv.FormatUint(user.ID, 10),                   // ユーザーIDをサブジェクトとして設定
-			IssuedAt:  jwt.NewNumericDate(time.Now()),                    // トークンの発行日時を設定
-			ID:        user.Username,                                     // ユーザー名をIDとして設定
-		},
-	})
-
-	t, err := token.SignedString(jwtSecret)
+	user, err := findUserByUsername(db, req.Username)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Could not create token")
+		return err
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"token": t})
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		return unauthorized()
+	}
+
+	token, err := createJWTToken(user.ID, user.Username, jwtSecret)
+	if err != nil {
+		return internalError("Could not create token")
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"token": token})
 }
 
-// APIキーを取得する
-// Authorization: ApiKey <access_token>:<secret_token>
-func getAPIToken(c echo.Context) (accessToken, secretToken string, err error) {
-	authHeader := c.Request().Header.Get("Authorization")
-	if authHeader == "" {
-		return "", "", echo.NewHTTPError(http.StatusUnauthorized, "Authorization header is required")
+func createJWTToken(userID uint64, username string, secret []byte) (string, error) {
+	claims := jwtCustomClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   strconv.FormatUint(userID, 10),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        username,
+		},
 	}
-
-	// AuthorizationヘッダーからAPIキーを取得
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "apikey" {
-		return "", "", echo.NewHTTPError(http.StatusUnauthorized, "Invalid Authorization header format")
-	}
-	parts = strings.SplitN(parts[1], ":", 2)
-	if len(parts) != 2 {
-		return "", "", echo.NewHTTPError(http.StatusUnauthorized, "Invalid Authorization header format")
-	}
-	accessToken = parts[0]
-	secretToken = parts[1]
-	if accessToken == "" || secretToken == "" {
-		return "", "", echo.NewHTTPError(http.StatusUnauthorized, "Access token and secret token are required")
-	}
-	if len(accessToken) < MinAccessTokenLength || len(secretToken) < MinSecretTokenLength {
-		return "", "", echo.NewHTTPError(http.StatusUnauthorized, "Invalid token length")
-	}
-	return accessToken, secretToken, nil
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(secret)
 }
 
-// APIキーでの認証を行う
-func APIKeyAuth(c echo.Context, db *gorm.DB) (userId *uint64, err error) {
-	accessToken, secretToken, err := getAPIToken(c)
+// APIキー認証: ヘッダーから認証情報取得・検証
+func APIKeyAuth(c echo.Context, db *gorm.DB) (*uint64, error) {
+	accessToken, secretToken, err := parseAPIKeyHeader(c)
 	if err != nil {
 		return nil, err
 	}
 
-	apiTokenRecord := &model.APIToken{}
-	if err := db.Where("access_token = ?", accessToken).First(apiTokenRecord).Error; err != nil {
+	// APIトークン取得
+	apiToken := &model.APIToken{}
+	if err := db.Where("access_token = ?", accessToken).First(apiToken).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid API key")
 		}
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Database error")
 	}
 
-	// APIキーのシークレットトークンを検証
-	err = bcrypt.CompareHashAndPassword([]byte(apiTokenRecord.SecretToken), []byte(secretToken))
-	if err != nil {
-		if err == bcrypt.ErrMismatchedHashAndPassword {
-			return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid secret token")
-		}
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Error comparing secret token")
+	// シークレットトークン検証
+	if err := bcrypt.CompareHashAndPassword([]byte(apiToken.SecretToken), []byte(secretToken)); err != nil {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Invalid secret token")
 	}
 
-	// APIキーに紐づくユーザーを取得
+	// ユーザー取得
 	user := &model.User{}
-	if err := db.Where("api_token_id = ?", apiTokenRecord.ID).First(user).Error; err != nil {
+	if err := db.Where("api_token_id = ?", apiToken.ID).First(user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, echo.NewHTTPError(http.StatusUnauthorized, "User not found for API key")
 		}
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Database error")
 	}
 
-	// 認証成功時はユーザー情報を返す
 	return &user.ID, nil
+}
+
+func parseAPIKeyHeader(c echo.Context) (string, string, error) {
+	authHeader := c.Request().Header.Get("Authorization")
+	if authHeader == "" {
+		return "", "", unauthorized()
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "apikey" {
+		return "", "", unauthorized()
+	}
+
+	tokens := strings.SplitN(parts[1], ":", 2)
+	if len(tokens) != 2 || len(tokens[0]) < MinAccessTokenLength || len(tokens[1]) < MinSecretTokenLength {
+		return "", "", unauthorized()
+	}
+	return tokens[0], tokens[1], nil
+}
+
+func findUserByUsername(db *gorm.DB, username string) (*model.User, error) {
+	var user model.User
+	if err := db.Where("username = ?", username).First(&user).Error; err != nil {
+		return nil, dbError(err)
+	}
+	return &user, nil
+}
+
+// エラーヘルパー
+func unauthorized() error {
+	return echo.NewHTTPError(http.StatusUnauthorized, "Invalid credentials")
+}
+
+func badRequest(msg string) error {
+	return echo.NewHTTPError(http.StatusBadRequest, msg)
+}
+
+func internalError(msg string) error {
+	return echo.NewHTTPError(http.StatusInternalServerError, msg)
+}
+
+func dbError(err error) error {
+	if err == gorm.ErrRecordNotFound {
+		return unauthorized()
+	}
+	return internalError("Database error")
 }

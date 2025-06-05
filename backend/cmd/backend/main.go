@@ -1,14 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/websocket"
-	"github.com/k0kubun/pp/v3"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -27,28 +28,11 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-func loginHandler(c echo.Context) error {
-	return auth.Login(c, db, []byte(conf.JWTSecret))
-}
-
-func helloWorldHandler(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "Hello, World!",
-	})
-}
-
-func authcationUser(c echo.Context) (*model.User, error) {
+// 共通関数
+func authenticatedUser(c echo.Context) (*model.User, error) {
 	userId, err := auth.JWTAuth(c)
-	if err != nil {
-		return nil, err
-	}
-	if userId == nil {
-		return nil, echo.NewHTTPError(http.StatusUnauthorized, "User ID not found in JWT token")
+	if err != nil || userId == nil {
+		return nil, echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 	}
 
 	var user model.User
@@ -58,352 +42,222 @@ func authcationUser(c echo.Context) (*model.User, error) {
 		}
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Database error")
 	}
-
 	return &user, nil
 }
 
-func getServersHandler(c echo.Context) error {
-	user, err := authcationUser(c)
+func getServerFromParam(c echo.Context) (*model.Server, error) {
+	idStr := c.Param("id")
+	if idStr == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
+	}
+	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		return err
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
 	}
-
-	//  pageとpageSizeはクエリパラメータから取得
-	page := c.QueryParam("page")
-	pageSize := c.QueryParam("pageSize")
-	if page == "" {
-		page = "1" // デフォルトページ
+	var sv model.Server
+	if err := db.First(&sv, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, echo.NewHTTPError(http.StatusNotFound, "Server not found")
+		}
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "Database error")
 	}
-	if pageSize == "" {
-		pageSize = "10" // デフォルトページサイズ
-	}
-	// クエリパラメータを整数に変換
-	pageInt, err := strconv.Atoi(page)
-	if err != nil || pageInt < 1 {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid page number")
-	}
-	pageSizeInt, err := strconv.Atoi(pageSize)
-	if err != nil || pageSizeInt < 1 {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid page size")
-	}
-
-	response, err := server.GetServersByOrganizationID(db, user.OrganizationID, pageInt, pageSizeInt)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve servers")
-	}
-
-	return c.JSON(http.StatusOK, response)
+	return &sv, nil
 }
 
-func getServerHandler(c echo.Context) error {
-	user, err := authcationUser(c)
-	if err != nil {
-		return err
+func checkOwnership(user *model.User, sv *model.Server) error {
+	if user.OrganizationID != sv.OrganizationID {
+		return echo.NewHTTPError(http.StatusForbidden, "Permission denied")
 	}
+	return nil
+}
 
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
-	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
-	}
-
-	response, err := server.GetServerByID(db, serverId)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
+func serverActionHandler(action func(model.Server) error, successMsg string) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		user, err := authenticatedUser(c)
+		if err != nil {
+			return err
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve server")
+		sv, err := getServerFromParam(c)
+		if err != nil {
+			return err
+		}
+		if err := checkOwnership(user, sv); err != nil {
+			return err
+		}
+		if err := action(*sv); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to execute action")
+		}
+		return c.JSON(http.StatusOK, map[string]string{"message": successMsg})
 	}
+}
 
-	if response.Server.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to access this server")
-	}
+// ハンドラ群
+func loginHandler(c echo.Context) error {
+	return auth.Login(c, db, []byte(conf.JWTSecret))
+}
 
-	return c.JSON(http.StatusOK, response)
+func helloWorldHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"message": "Hello, World!"})
 }
 
 func profileHandler(c echo.Context) error {
-	user, err := authcationUser(c)
+	user, err := authenticatedUser(c)
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, user)
 }
 
-func postServerPowerOffHandler(c echo.Context) error {
-	user, err := authcationUser(c)
+func getServersHandler(c echo.Context) error {
+	user, err := authenticatedUser(c)
 	if err != nil {
 		return err
 	}
-
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	pageSize, _ := strconv.Atoi(c.QueryParam("pageSize"))
+	if page < 1 {
+		page = 1
 	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	resp, err := server.GetServersByOrganizationID(db, user.OrganizationID, page, pageSize)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve servers")
 	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
-	}
-
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to power off this server")
-	}
-
-	if err := server.ServerPowerOff(sv); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to power off server")
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "Server powered off successfully"})
+	return c.JSON(http.StatusOK, resp)
 }
 
-func postServerPowerOnHandler(c echo.Context) error {
-	user, err := authcationUser(c)
+func getServerHandler(c echo.Context) error {
+	user, err := authenticatedUser(c)
 	if err != nil {
 		return err
 	}
-
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
-	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
+	svResp, err := server.GetServerByID(db, parseUintParam(c, "id"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
-	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve server")
 	}
-
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to power on this server")
+	if err := checkOwnership(user, &svResp.Server); err != nil {
+		return err
 	}
-
-	if err := server.ServerPowerOn(sv); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to power on server")
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "Server powered on successfully"})
+	return c.JSON(http.StatusOK, svResp)
 }
 
-func postServerPowerRebootHandler(c echo.Context) error {
-	user, err := authcationUser(c)
-	if err != nil {
-		return err
-	}
-
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
-	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
-	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
-	}
-
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to reboot this server")
-	}
-
-	if err := server.ServerReboot(sv); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to reboot server")
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "Server rebooted successfully"})
+func parseUintParam(c echo.Context, name string) uint64 {
+	idStr := c.Param(name)
+	id, _ := strconv.ParseUint(idStr, 10, 64)
+	return id
 }
 
-func postServerPowerForceRebootHandler(c echo.Context) error {
-	user, err := authcationUser(c)
-	if err != nil {
-		return err
-	}
-
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
-	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
-	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
-	}
-
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to force reboot this server")
-	}
-
-	if err := server.ServerForceReboot(sv); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to force reboot server")
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "Server force rebooted successfully"})
+type wsReader struct {
+	conn *websocket.Conn
 }
 
-func postServerPowerForceOffHandler(c echo.Context) error {
-	user, err := authcationUser(c)
+func (r *wsReader) Read(p []byte) (int, error) {
+	mt, msg, err := r.conn.ReadMessage()
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
+	if mt != websocket.BinaryMessage {
+		return 0, io.EOF
 	}
+	n := copy(p, msg)
+	return n, nil
+}
 
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
+type wsWriter struct {
+	conn *websocket.Conn
+}
+
+func (w *wsWriter) Write(p []byte) (int, error) {
+	err := w.conn.WriteMessage(websocket.BinaryMessage, p)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
+		return 0, err
 	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
-	}
-
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to force off this server")
-	}
-
-	if err := server.ServerForcePowerOff(sv); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to force power off server")
-	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "Server force powered off successfully"})
+	return len(p), nil
 }
 
 func getServerVNCHandler(c echo.Context) error {
 	token := c.QueryParam("token")
-
-	c.Logger().Debug("getServerVNCHandler called")
-	pp.Println("getServerVNCHandler token:", token)
-
 	if token == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Token is required")
 	}
+
 	userId, err := auth.JWTTokenAuth(token, conf.JWTSecret)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 	}
 
-	serverIdStr := c.Param("id")
-	if serverIdStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Server ID is required")
-	}
-
-	serverId, err := strconv.ParseUint(serverIdStr, 10, 64)
+	sv, err := getServerFromParam(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid Server ID format")
-	}
-
-	var sv model.Server
-	if err := db.First(&sv, serverId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Server not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
+		return err
 	}
 
 	var user model.User
 	if err := db.First(&user, *userId).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "User not found")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "Database error")
+		return echo.NewHTTPError(http.StatusUnauthorized, "User not found")
+	}
+	if err := checkOwnership(&user, sv); err != nil {
+		return err
 	}
 
-	if sv.OrganizationID != user.OrganizationID {
-		return echo.NewHTTPError(http.StatusForbidden, "You do not have permission to access this server's VNC")
-	}
-
-	port, err := server.ServerDomDisplay(sv)
+	port, err := server.ServerDomDisplay(*sv)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to get VNC port")
 	}
 
-	vncConn, err := net.Dial("tcp", ""+sv.HostName+":"+strconv.Itoa(port))
+	vncConn, err := net.Dial("tcp", sv.HostName+":"+strconv.Itoa(port))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to connect to VNC server")
 	}
-	defer vncConn.Close()
 
 	wsConn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to upgrade connection to WebSocket")
+		vncConn.Close()
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to upgrade to WebSocket")
 	}
-	defer wsConn.Close()
 
-	// WebSocket → VNC
-	go func() {
-		defer vncConn.Close()
-		defer wsConn.Close()
-		for {
-			mt, msg, err := wsConn.ReadMessage()
-			if err != nil || mt != websocket.BinaryMessage {
-				break
-			}
-			vncConn.Write(msg)
-		}
+	defer func() {
+		wsConn.Close()
+		vncConn.Close()
 	}()
 
-	// VNC → WebSocket
-	buf := make([]byte, 1024)
-	for {
-		n, err := vncConn.Read(buf)
-		if err != nil {
-			break
-		}
-		wsConn.WriteMessage(websocket.BinaryMessage, buf[:n])
-	}
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	defer cancel()
+
+	wsR := &wsReader{conn: wsConn}
+	wsW := &wsWriter{conn: wsConn}
+
+	go func() {
+		defer cancel()
+		io.Copy(vncConn, wsR) // WebSocket → VNC
+	}()
+
+	go func() {
+		defer cancel()
+		io.Copy(wsW, vncConn) // VNC → WebSocket
+	}()
+
+	<-ctx.Done()
+
 	return nil
 }
 
 func main() {
-	var err error
 	var confPath string
-	flag.StringVar(&confPath, "config", "config.yaml", "Path to the configuration file")
+	flag.StringVar(&confPath, "config", "config.yaml", "Path to config file")
 	flag.Parse()
 
+	var err error
 	conf, err = config.Load(confPath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
 	e := echo.New()
-
-	// middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
@@ -412,23 +266,20 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// DB接続の初期化
 	db, err = gorm.Open(sqlite.Open("test.sqlite3"), &gorm.Config{})
 	if err != nil {
-		e.Logger.Fatal("Failed to connect to database:", err)
+		e.Logger.Fatal("DB connection failed:", err)
 	}
-	// マイグレーション
 	if err := model.Migrate(db); err != nil {
-		e.Logger.Fatal("Failed to migrate database:", err)
+		e.Logger.Fatal("Migration failed:", err)
 	}
 
+	// ルーティング
 	e.POST("/login", loginHandler)
 	e.GET("/", helloWorldHandler)
 	e.GET("/ws/server/:id/vnc", getServerVNCHandler)
 
-	// JWTが必要なグループ
 	api := e.Group("/api")
-	// jwt認証ミドルウェアを適用
 	api.Use(echojwt.WithConfig(echojwt.Config{
 		NewClaimsFunc: auth.NewJWTClaims,
 		SigningKey:    []byte(conf.JWTSecret),
@@ -437,10 +288,11 @@ func main() {
 	api.GET("/profile", profileHandler)
 	api.GET("/servers", getServersHandler)
 	api.GET("/server/:id", getServerHandler)
-	api.POST("/server/:id/power/off", postServerPowerOffHandler)
-	api.POST("/server/:id/power/on", postServerPowerOnHandler)
-	api.POST("/server/:id/power/reboot", postServerPowerRebootHandler)
-	api.POST("/server/:id/power/force-reboot", postServerPowerForceRebootHandler)
-	api.POST("/server/:id/power/force-off", postServerPowerForceOffHandler)
+	api.POST("/server/:id/power/off", serverActionHandler(server.ServerPowerOff, "Server powered off successfully"))
+	api.POST("/server/:id/power/on", serverActionHandler(server.ServerPowerOn, "Server powered on successfully"))
+	api.POST("/server/:id/power/reboot", serverActionHandler(server.ServerReboot, "Server rebooted successfully"))
+	api.POST("/server/:id/power/force-reboot", serverActionHandler(server.ServerForceReboot, "Server force rebooted successfully"))
+	api.POST("/server/:id/power/force-off", serverActionHandler(server.ServerForcePowerOff, "Server force powered off successfully"))
+
 	e.Logger.Fatal(e.Start(":8080"))
 }

@@ -15,23 +15,27 @@ import (
 
 type ServersResponse struct {
 	Servers    []model.Server `json:"servers"`
-	TotalCount int64          `json:"total_count"` // 総件数
-	Page       int            `json:"page"`        // 現在のページ
-	PageSize   int            `json:"page_size"`   // 1ページあたりの件数
+	TotalCount int64          `json:"total_count"`
+	Page       int            `json:"page"`
+	PageSize   int            `json:"page_size"`
+}
+
+type ServerResponse struct {
+	Server model.Server `json:"server"`
+	Status string       `json:"status"`
 }
 
 func GetServersByOrganizationID(db *gorm.DB, organizationID uint64, page, pageSize int) (ServersResponse, error) {
-	var servers []model.Server
-	var total int64
-
+	var (
+		servers []model.Server
+		total   int64
+	)
 	pp.Println(page, pageSize, organizationID)
 
-	// 総件数取得
 	if err := db.Model(&model.Server{}).Where("organization_id = ?", organizationID).Count(&total).Error; err != nil {
 		return ServersResponse{}, err
 	}
 
-	// ページング処理
 	offset := (page - 1) * pageSize
 	if err := db.Where("organization_id = ?", organizationID).
 		Offset(offset).
@@ -40,132 +44,71 @@ func GetServersByOrganizationID(db *gorm.DB, organizationID uint64, page, pageSi
 		return ServersResponse{}, err
 	}
 
-	return ServersResponse{
-		Servers:    servers,
-		TotalCount: total,
-		Page:       page,
-		PageSize:   pageSize,
-	}, nil
-}
-
-type ServerResponse struct {
-	Server model.Server `json:"server"`
-	Status string       `json:"status"` // サーバーの状態
+	return ServersResponse{Servers: servers, TotalCount: total, Page: page, PageSize: pageSize}, nil
 }
 
 func GetServerByID(db *gorm.DB, serverID uint64) (ServerResponse, error) {
 	var server model.Server
 	if err := db.First(&server, serverID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return ServerResponse{}, gorm.ErrRecordNotFound
-		}
 		return ServerResponse{}, err
 	}
 
-	// サーバーの状態を取得（ここではダミーとして "running" を返す）
 	status := getServerStatus(server)
-
-	return ServerResponse{
-		Server: server,
-		Status: status,
-	}, nil
-}
-
-func execSSHCommand(host, command string) ([]byte, error) {
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", fmt.Sprintf("%s@%s", "vmmgr", host), command)
-	return cmd.CombinedOutput()
+	return ServerResponse{Server: server, Status: status}, nil
 }
 
 func getServerStatus(server model.Server) string {
-	// ホストサーバにSSHを行ってvirsh dominfoを実行し、状態を取得するロジックを実装
-	output, err := execSSHCommand(server.HostName, "virsh-wrapper dominfo "+server.Name)
+	output, err := execSSH(server.HostName, "virsh-wrapper dominfo "+server.Name)
 	if err != nil {
-		log.Println("Error executing command:", err)
+		log.Println("dominfo 実行失敗:", err)
 		return "unknown"
 	}
-	// 出力を解析して状態を取得
 	info, err := libvirt.ParseDomInfo(string(output))
 	if err != nil {
-		log.Println("Error parsing dominfo:", err)
+		log.Println("dominfo 解析失敗:", err)
 		return "unknown"
 	}
 	return info.State
 }
 
-func ServerPowerOn(server model.Server) error {
-	// ホストサーバにSSHを行ってvirsh startを実行する
-	_, err := execSSHCommand(server.HostName, "virsh-wrapper start "+server.Name)
-	if err != nil {
-		log.Println("Error starting server:", err)
-		return err
-	}
-	return nil
+func execSSH(host, command string) ([]byte, error) {
+	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "vmmgr@"+host, command)
+	return cmd.CombinedOutput()
 }
 
-func ServerPowerOff(server model.Server) error {
-	// ホストサーバにSSHを行ってvirsh shutdownを実行する
-	_, err := execSSHCommand(server.HostName, "virsh-wrapper shutdown "+server.Name)
+// 汎用コマンド実行系
+func executeVMCommand(server model.Server, action string) error {
+	_, err := execSSH(server.HostName, fmt.Sprintf("virsh-wrapper %s %s", action, server.Name))
 	if err != nil {
-		log.Println("Error shutting down server:", err)
-		return err
+		log.Printf("%s 実行失敗: %v\n", action, err)
 	}
-	return nil
+	return err
 }
 
-func ServerReboot(server model.Server) error {
-	// ホストサーバにSSHを行ってvirsh rebootを実行する
-	_, err := execSSHCommand(server.HostName, "virsh-wrapper reboot "+server.Name)
-	if err != nil {
-		log.Println("Error rebooting server:", err)
-		return err
-	}
-	return nil
-}
+func ServerPowerOn(server model.Server) error       { return executeVMCommand(server, "start") }
+func ServerPowerOff(server model.Server) error      { return executeVMCommand(server, "shutdown") }
+func ServerReboot(server model.Server) error        { return executeVMCommand(server, "reboot") }
+func ServerForceReboot(server model.Server) error   { return executeVMCommand(server, "reset") }
+func ServerForcePowerOff(server model.Server) error { return executeVMCommand(server, "destroy") }
 
-func ServerForceReboot(server model.Server) error {
-	// ホストサーバにSSHを行ってvirsh resetを実行する
-	_, err := execSSHCommand(server.HostName, "virsh-wrapper reset "+server.Name)
+func ServerDomDisplay(server model.Server) (int, error) {
+	out, err := execSSH(server.HostName, "virsh-wrapper domdisplay "+server.Name)
 	if err != nil {
-		log.Println("Error force rebooting server:", err)
-		return err
-	}
-	return nil
-}
-
-func ServerForcePowerOff(server model.Server) error {
-	// ホストサーバにSSHを行ってvirsh destroyを実行する
-	_, err := execSSHCommand(server.HostName, "virsh-wrapper destroy "+server.Name)
-	if err != nil {
-		log.Println("Error force shutting down server:", err)
-		return err
-	}
-	return nil
-}
-
-func ServerDomDisplay(server model.Server) (port int, err error) {
-	// ホストサーバにSSHを行ってvirsh domdisplayを実行する
-	out, err := execSSHCommand(server.HostName, "virsh-wrapper domdisplay "+server.Name)
-	if err != nil {
-		log.Println("Error displaying server:", err)
+		log.Println("domdisplay 実行失敗:", err)
 		return 0, err
 	}
 
-	// vnc://127.0.0.1:5900のような形式で出力されるので、ポート番号を抽出
-	s := strings.Split(string(out), ":")
-	if len(s) < 3 {
-		log.Println("Invalid display output:", string(out))
-		return 0, err
+	parts := strings.Split(strings.TrimSpace(string(out)), ":")
+	if len(parts) < 4 {
+		log.Println("出力形式エラー:", string(out))
+		return 0, fmt.Errorf("invalid domdisplay output")
 	}
-	// ポート番号を整数に変換
-	portNum := strings.TrimSpace(s[3])
-	if portNum == "" {
-		log.Println("Port number is empty")
-		return 0, err
-	}
-	portInt, err := strconv.Atoi(portNum)
+
+	port, err := strconv.Atoi(parts[3])
 	if err != nil {
-		log.Println("Error converting port number:", err)
+		log.Println("ポート変換失敗:", err)
 		return 0, err
 	}
-	return portInt + 5900, nil
+
+	return port + 5900, nil
 }

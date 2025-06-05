@@ -363,9 +363,12 @@ func getServerVNCHandler(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to upgrade connection to WebSocket")
 	}
+	defer wsConn.Close()
 
 	// WebSocket → VNC
 	go func() {
+		defer vncConn.Close()
+		defer wsConn.Close()
 		for {
 			mt, msg, err := wsConn.ReadMessage()
 			if err != nil || mt != websocket.BinaryMessage {

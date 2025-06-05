@@ -1,1 +1,7 @@
 frontend/public/noVNC/
+backend/cmd/backend/backend
+backend/cmd/virsh-wrapper/virsh-wrapper
+*.key
+*.sqlite3
+*.db
+dev.sh

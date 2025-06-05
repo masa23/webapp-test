@@ -3,6 +3,7 @@ module github.com/masa23/webapp-test
 go 1.24.2
 
 require (
+	github.com/caarlos0/go-shellwords v1.0.12
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/k0kubun/pp/v3 v3.4.1

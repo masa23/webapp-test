@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"os/exec"
 	"strconv"
@@ -71,13 +72,13 @@ func GetServerByID(db *gorm.DB, serverID uint64) (ServerResponse, error) {
 }
 
 func execSSHCommand(host, command string) ([]byte, error) {
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", host, command)
+	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", fmt.Sprintf("%s@%s", "vmmgr", host), command)
 	return cmd.CombinedOutput()
 }
 
 func getServerStatus(server model.Server) string {
 	// ホストサーバにSSHを行ってvirsh dominfoを実行し、状態を取得するロジックを実装
-	output, err := execSSHCommand(server.HostName, "virsh dominfo "+server.Name)
+	output, err := execSSHCommand(server.HostName, "virsh-wrapper dominfo "+server.Name)
 	if err != nil {
 		log.Println("Error executing command:", err)
 		return "unknown"
@@ -93,7 +94,7 @@ func getServerStatus(server model.Server) string {
 
 func ServerPowerOn(server model.Server) error {
 	// ホストサーバにSSHを行ってvirsh startを実行する
-	_, err := execSSHCommand(server.HostName, "virsh start "+server.Name)
+	_, err := execSSHCommand(server.HostName, "virsh-wrapper start "+server.Name)
 	if err != nil {
 		log.Println("Error starting server:", err)
 		return err
@@ -103,7 +104,7 @@ func ServerPowerOn(server model.Server) error {
 
 func ServerPowerOff(server model.Server) error {
 	// ホストサーバにSSHを行ってvirsh shutdownを実行する
-	_, err := execSSHCommand(server.HostName, "virsh shutdown "+server.Name)
+	_, err := execSSHCommand(server.HostName, "virsh-wrapper shutdown "+server.Name)
 	if err != nil {
 		log.Println("Error shutting down server:", err)
 		return err
@@ -113,7 +114,7 @@ func ServerPowerOff(server model.Server) error {
 
 func ServerReboot(server model.Server) error {
 	// ホストサーバにSSHを行ってvirsh rebootを実行する
-	_, err := execSSHCommand(server.HostName, "virsh reboot "+server.Name)
+	_, err := execSSHCommand(server.HostName, "virsh-wrapper reboot "+server.Name)
 	if err != nil {
 		log.Println("Error rebooting server:", err)
 		return err
@@ -123,7 +124,7 @@ func ServerReboot(server model.Server) error {
 
 func ServerForceReboot(server model.Server) error {
 	// ホストサーバにSSHを行ってvirsh resetを実行する
-	_, err := execSSHCommand(server.HostName, "virsh reset "+server.Name)
+	_, err := execSSHCommand(server.HostName, "virsh-wrapper reset "+server.Name)
 	if err != nil {
 		log.Println("Error force rebooting server:", err)
 		return err
@@ -133,7 +134,7 @@ func ServerForceReboot(server model.Server) error {
 
 func ServerForcePowerOff(server model.Server) error {
 	// ホストサーバにSSHを行ってvirsh destroyを実行する
-	_, err := execSSHCommand(server.HostName, "virsh destroy "+server.Name)
+	_, err := execSSHCommand(server.HostName, "virsh-wrapper destroy "+server.Name)
 	if err != nil {
 		log.Println("Error force shutting down server:", err)
 		return err
@@ -143,7 +144,7 @@ func ServerForcePowerOff(server model.Server) error {
 
 func ServerDomDisplay(server model.Server) (port int, err error) {
 	// ホストサーバにSSHを行ってvirsh domdisplayを実行する
-	out, err := execSSHCommand(server.HostName, "virsh domdisplay "+server.Name)
+	out, err := execSSHCommand(server.HostName, "virsh-wrapper domdisplay "+server.Name)
 	if err != nil {
 		log.Println("Error displaying server:", err)
 		return 0, err

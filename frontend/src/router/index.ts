@@ -22,12 +22,10 @@ const router = createRouter({
 
 
 // 認証チェック
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to, _from) => {
   const auth = useAuth()
-  if (to.meta.requiresAuth && auth.token === null) { 
-    next('/login')
-  } else {
-    next()
+  if (to.meta.requiresAuth) {
+    auth.getToken() // トークンを取得して更新
   }
 })
 

@@ -93,7 +93,15 @@ func serverActionHandler(action func(model.Server) error, successMsg string) ech
 
 // ハンドラ群
 func loginHandler(c echo.Context) error {
-	return auth.Login(c, db, []byte(conf.JWTSecret))
+	return auth.Login(c, db)
+}
+
+func logoutHandler(c echo.Context) error {
+	return auth.Logout(c, db)
+}
+
+func refreshHandler(c echo.Context) error {
+	return auth.Refresh(c, db, conf.JWTSecret)
 }
 
 func helloWorldHandler(c echo.Context) error {
@@ -186,7 +194,7 @@ func getServerVNCHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Token is required")
 	}
 
-	userId, err := auth.JWTTokenAuth(token, conf.JWTSecret)
+	userId, err := auth.JWTTokenAuth(c, token, conf.JWTSecret)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 	}
@@ -275,7 +283,9 @@ func main() {
 	}
 
 	// ルーティング
-	e.POST("/login", loginHandler)
+	e.POST("/auth/login", loginHandler)
+	e.GET("/auth/refresh", refreshHandler)
+	e.POST("/auth/logout", logoutHandler)
 	e.GET("/", helloWorldHandler)
 	e.GET("/ws/server/:id/vnc", getServerVNCHandler)
 

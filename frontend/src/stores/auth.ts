@@ -3,60 +3,88 @@ import { defineStore } from 'pinia'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
+type AccessToken = {
+  access_token: string
+  expires_at: number
+}
 
 export const useAuth = defineStore('auth', () => {
   const router = useRouter()
-  const token = ref<string | null>(localStorage.getItem('token'))
+  const accessToken = ref<AccessToken | null>(null)
   const username = ref<string | null>(null)
-
-  const isAuthenticated = computed(() => !!token.value)
 
   const login = async (usernameInput: string, passwordInput: string) => {
     try {
-      const res = await axios.post('/login', {
+      const res = await axios.post('/auth/login', {
         username: usernameInput,
         password: passwordInput,
       })
-      token.value = res.data.token
-      if (!token.value) {
-        throw new Error('トークンが取得できませんでした')
-      }
-      localStorage.setItem('token', token.value)
+      await fetchAccessToken()
       await fetchProfile()
       router.push('/')
-    } catch (err) {
-      const error = err as any
-      throw new Error(error.response?.data?.message || 'ログイン失敗')
+    } catch (error) {
+      throw new Error('Login failed')
+    }
+  }
+
+  const fetchAccessToken = async () => {
+    if (
+      !accessToken.value ||
+      !accessToken.value.access_token ||
+      new Date().getTime() > (accessToken.value.expires_at*1000 - 10 * 1000)
+    ) {
+      try {
+        const res = await axios.get('/auth/refresh')
+        if (res.data && res.data.access_token) {
+          accessToken.value = {
+            access_token: res.data.access_token,
+            expires_at: res.data.expires_at,
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch access token', error)
+        logout()
+      }
     }
   }
 
   const fetchProfile = async () => {
-    if (!token.value) return
+    const t = await getToken()
     try {
       const res = await axios.get('/api/profile', {
         headers: {
-          Authorization: `Bearer ${token.value}`,
+          Authorization: `Bearer ${t}`,
         },
       })
-      username.value = res.data.username
-    } catch {
+      if (res.data && res.data.username) {
+        username.value = res.data.username
+      }
+    } catch (error) {
+      console.error('Failed to fetch profile', error)
       logout()
     }
   }
 
+  const getToken = async () => {
+    await fetchAccessToken()
+    return accessToken.value?.access_token || null
+  }
+
   const logout = () => {
-    token.value = null
-    username.value = null
-    localStorage.removeItem('token')
+    try {
+      axios.post('/auth/logout')
+    } catch (error) {
+      console.error('Logout failed', error)
+    }
+    accessToken.value = null
     router.push('/login')
   }
 
   return {
-    token,
     username,
-    isAuthenticated,
+    getToken,
     login,
     logout,
-    fetchProfile,
+    fetchAccessToken,
   }
 })

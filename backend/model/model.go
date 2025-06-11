@@ -13,6 +13,7 @@ func Migrate(db *gorm.DB) error {
 		&APIToken{},
 		&Organization{},
 		&Server{},
+		&RefreshToken{},
 	)
 }
 
@@ -50,4 +51,11 @@ type Server struct {
 	Name           string `gorm:"size:64;not null" json:"name"`           // VMサーバ名
 	HostName       string `gorm:"size:64;not null" json:"host_name"`      // ホスト名
 	OrganizationID uint64 `gorm:"not null; index" json:"organization_id"` // 組織ID
+}
+
+type RefreshToken struct {
+	Model
+	Token     string    `gorm:"size:64:not null uniqueIndex" json:"token"` // リフレッシュトークン
+	UserID    uint64    `gorm:"not null; index" json:"user_id"`            // ユーザID
+	ExpiresAt time.Time `gorm:"not null" json:"expires_at"`                // トークンの有効期限
 }

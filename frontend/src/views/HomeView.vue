@@ -26,17 +26,12 @@ const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(true)
 
-// 共通ヘッダー
-const authHeader = () => ({
-  headers: { Authorization: `Bearer ${auth.token}` }
-})
-
 // サーバー一覧取得
 const fetchServers = async () => {
   loading.value = true
   try {
     const { data } = await axios.get('/api/servers', {
-      ...authHeader(),
+      headers: { Authorization: `Bearer ${await auth.getToken()}` },
       params: { page: page.value, pageSize: pageSize.value }
     })
     totalCount.value = data.total_count
@@ -61,7 +56,9 @@ const fetchServers = async () => {
 
 // サーバー詳細取得
 const fetchServerById = async (id: number) => {
-  const res = await axios.get(`/api/server/${id}`, authHeader())
+  const res = await axios.get(`/api/server/${id}`, {
+    headers: { Authorization: `Bearer ${await auth.getToken()}` }
+  })
   return res.data
 }
 
@@ -69,7 +66,9 @@ const fetchServerById = async (id: number) => {
 const postServerAction = async (id: number, action: string, confirmMsg: string, updateStatus = false) => {
   if (!confirm(confirmMsg)) return
   try {
-    await axios.post(`/api/server/${id}/${action}`, {}, authHeader())
+    await axios.post(`/api/server/${id}/${action}`, {}, {
+      headers: { Authorization: `Bearer ${await auth.getToken()}` }
+    })
     if (updateStatus) {
       setTimeout(async () => {
         try {
@@ -103,8 +102,8 @@ const handleAxiosError = (err: unknown) => {
   }
 }
 
-const openVNC = (id: number) => {
-  const url = `/noVNC/vnc.html?autoconnect=true&path=/ws/server/${id}/vnc?token=${auth.token}`
+const openVNC = async (id: number) => {
+  const url = `/noVNC/vnc.html?autoconnect=true&path=/ws/server/${id}/vnc?token=${await auth.getToken()}`
   console.log('Opening VNC:', url)
   // 新しいタブで開く
   window.open(url, '_blank')

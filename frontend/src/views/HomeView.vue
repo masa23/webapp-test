@@ -25,14 +25,22 @@ const totalCount = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(true)
+const searchQuery = ref('')
 
 // サーバー一覧取得
 const fetchServers = async () => {
   loading.value = true
+  const params: Record<string, any> = {
+    page: page.value,
+    pageSize: pageSize.value
+  }
+  if (searchQuery.value) {
+    params.search = searchQuery.value
+  }
   try {
     const { data } = await axios.get('/api/servers', {
       headers: { Authorization: `Bearer ${await auth.getToken()}` },
-      params: { page: page.value, pageSize: pageSize.value }
+      params: params
     })
     totalCount.value = data.total_count
 
@@ -120,7 +128,14 @@ onMounted(() => fetchServers())
 
 <template>
   <div class="p-8 space-y-8">
-    <div>
+    <div class="flex justify-between items-center px-2">
+      <div class="flex items-center">
+        <input v-model="searchQuery"  type="text" placeholder="サーバー名で検索" class="border rounded px-2 py-1" />
+        <button @click="fetchServers" class="ml-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+          🔍 検索
+        </button>
+      </div>
+
       <button @click="fetchServers"
         class="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition">
         🔄 Reload
@@ -159,12 +174,18 @@ onMounted(() => fetchServers())
               </td>
               <td class="px-4 py-3">
                 <div class="flex flex-wrap gap-2">
-                  <button @click="postServerPowerOn(server.id)" class="bg-blue-100 text-blue-700 rounded-md border border-gray-200 p-1 hover:bg-blue-200">起動</button>
-                  <button @click="postServerPowerOff(server.id)" class="bg-red-100 text-red-700 rounded-md border border-gray-200 p-1 hover:bg-red-200">停止</button>
-                  <button @click="postServerPowerReboot(server.id)" class="bg-orange-100 text-orange-700 rounded-md border border-gray-200 p-1 hover:bg-orange-200">再起動</button>
-                  <button @click="postServerPowerForceReboot(server.id)" class="bg-orange-200 text-orange-800 rounded-md border border-gray-200 p-1 hover:bg-orange-300">強制再起動</button>
-                  <button @click="postServerPowerForceOff(server.id)" class="bg-gray-800 text-white rounded-md border border-gray-300 p-1 hover:bg-gray-700">強制停止</button>
-                  <button @click="openVNC(server.id)" class="bg-purple-100 text-purple-700 rounded-md border border-gray-200 p-1 hover:bg-purple-200">VNC</button>
+                  <button @click="postServerPowerOn(server.id)"
+                    class="bg-blue-100 text-blue-700 rounded-md border border-gray-200 p-1 hover:bg-blue-200">起動</button>
+                  <button @click="postServerPowerOff(server.id)"
+                    class="bg-red-100 text-red-700 rounded-md border border-gray-200 p-1 hover:bg-red-200">停止</button>
+                  <button @click="postServerPowerReboot(server.id)"
+                    class="bg-orange-100 text-orange-700 rounded-md border border-gray-200 p-1 hover:bg-orange-200">再起動</button>
+                  <button @click="postServerPowerForceReboot(server.id)"
+                    class="bg-orange-200 text-orange-800 rounded-md border border-gray-200 p-1 hover:bg-orange-300">強制再起動</button>
+                  <button @click="postServerPowerForceOff(server.id)"
+                    class="bg-gray-800 text-white rounded-md border border-gray-300 p-1 hover:bg-gray-700">強制停止</button>
+                  <button @click="openVNC(server.id)"
+                    class="bg-purple-100 text-purple-700 rounded-md border border-gray-200 p-1 hover:bg-purple-200">VNC</button>
                 </div>
               </td>
             </tr>
@@ -173,11 +194,13 @@ onMounted(() => fetchServers())
 
         <!-- ページネーション -->
         <div class="flex justify-center items-center mt-6 gap-4">
-          <button @click="previousPage" :disabled="page === 1" class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
+          <button @click="previousPage" :disabled="page === 1"
+            class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
             ⬅ Prev
           </button>
           <span class="text-sm text-gray-600">Page {{ page }}</span>
-          <button @click="nextPage" :disabled="page * pageSize >= totalCount" class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
+          <button @click="nextPage" :disabled="page * pageSize >= totalCount"
+            class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
             Next ➡
           </button>
         </div>
@@ -186,5 +209,4 @@ onMounted(() => fetchServers())
   </div>
 </template>
 
-<style>
-</style>
+<style></style>

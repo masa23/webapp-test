@@ -18,8 +18,10 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+const cookieName = "svmmgr_token"
+
 // ログインしてRefreshトークンを生成してクッキーに設定
-func Login(c echo.Context, db *gorm.DB) error {
+func Login(c echo.Context, db *gorm.DB, expired time.Duration) error {
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
 		return errorMessage(c, "Invalid request format")
@@ -35,7 +37,7 @@ func Login(c echo.Context, db *gorm.DB) error {
 	}
 
 	// リフレッシュトークンを生成
-	rt, err := GenerateRefreshToken(c, user.ID, db)
+	rt, err := GenerateRefreshToken(c, user.ID, db, expired)
 	if err != nil {
 		return errorMessage(c, "Failed to generate refresh token: "+err.Error())
 	}
@@ -57,14 +59,11 @@ type RefreshTokenResponse struct {
 	ExpiresAt   int64  `json:"expires_at"` // UNIXタイムスタンプ
 }
 
-func Refresh(c echo.Context, db *gorm.DB, jwtSecret string) error {
+func Refresh(c echo.Context, db *gorm.DB, jwtSecret string, expired time.Duration) error {
 	rt, err := CheckRefreshToken(c, db)
 	if err != nil {
 		return errorMessage(c, "Invalid or expired refresh token: "+err.Error())
 	}
-
-	// expired
-	expired := time.Second * 30
 
 	// 新しいアクセストークンを生成
 	newAccessToken, err := GenerateJWTToken(c, rt.UserID, rt.Token, []byte(jwtSecret), expired)
@@ -78,15 +77,15 @@ func Refresh(c echo.Context, db *gorm.DB, jwtSecret string) error {
 	})
 }
 
-func setRefreshTokenCookie(c echo.Context, token string) {
+func setRefreshTokenCookie(c echo.Context, token string, expired time.Duration) {
 	cookie := new(http.Cookie)
-	cookie.Name = "refresh_token"
+	cookie.Name = cookieName
 	cookie.Value = token
 	cookie.HttpOnly = true
 	cookie.Secure = true
 	cookie.SameSite = http.SameSiteStrictMode
 	cookie.Path = "/"
-	cookie.Expires = time.Now().Add(7 * 24 * time.Hour)
+	cookie.Expires = time.Now().Add(expired)
 	c.SetCookie(cookie)
 }
 
@@ -99,7 +98,7 @@ func generateSecureToken(n int) (string, error) {
 	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(b), nil
 }
 
-func generateRefreshToken(userID uint64, db *gorm.DB) (*model.RefreshToken, error) {
+func generateRefreshToken(userID uint64, db *gorm.DB, expired time.Duration) (*model.RefreshToken, error) {
 	// 32バイトのランダム値 → Base64で約43文字（URLセーフ）
 	token, err := generateSecureToken(32)
 	if err != nil {
@@ -109,7 +108,7 @@ func generateRefreshToken(userID uint64, db *gorm.DB) (*model.RefreshToken, erro
 	rt := &model.RefreshToken{
 		Token:     token,
 		UserID:    userID,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour), // 7日間
+		ExpiresAt: time.Now().Add(expired),
 	}
 
 	if err := db.Create(rt).Error; err != nil {
@@ -118,20 +117,20 @@ func generateRefreshToken(userID uint64, db *gorm.DB) (*model.RefreshToken, erro
 	return rt, nil
 }
 
-func GenerateRefreshToken(c echo.Context, userID uint64, db *gorm.DB) (*model.RefreshToken, error) {
-	rt, err := generateRefreshToken(userID, db)
+func GenerateRefreshToken(c echo.Context, userID uint64, db *gorm.DB, expired time.Duration) (*model.RefreshToken, error) {
+	rt, err := generateRefreshToken(userID, db, expired)
 	if err != nil {
 		return nil, err
 	}
 
 	// クッキーにリフレッシュトークンを設定
-	setRefreshTokenCookie(c, rt.Token)
+	setRefreshTokenCookie(c, rt.Token, expired)
 
 	return rt, nil
 }
 
 func CheckRefreshToken(c echo.Context, db *gorm.DB) (*model.RefreshToken, error) {
-	tokenStr, err := c.Cookie("refresh_token")
+	tokenStr, err := c.Cookie(cookieName)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +152,7 @@ func CheckRefreshToken(c echo.Context, db *gorm.DB) (*model.RefreshToken, error)
 
 func deleteRefreshTokenCookie(c echo.Context) {
 	cookie := new(http.Cookie)
-	cookie.Name = "refresh_token"
+	cookie.Name = cookieName
 	cookie.Value = ""
 	cookie.HttpOnly = true
 	cookie.Secure = true
@@ -164,7 +163,7 @@ func deleteRefreshTokenCookie(c echo.Context) {
 }
 
 func revokedRefreshToken(c echo.Context, db *gorm.DB) error {
-	tokenStr, err := c.Cookie("refresh_token")
+	tokenStr, err := c.Cookie(cookieName)
 	if err != nil {
 		return err
 	}

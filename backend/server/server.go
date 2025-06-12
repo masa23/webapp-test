@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/k0kubun/pp/v3"
 	"github.com/masa23/webapp-test/libvirt"
 	"github.com/masa23/webapp-test/model"
 	"gorm.io/gorm"
@@ -25,22 +24,23 @@ type ServerResponse struct {
 	Status string       `json:"status"`
 }
 
-func GetServersByOrganizationID(db *gorm.DB, organizationID uint64, page, pageSize int) (ServersResponse, error) {
+func GetServersByOrganizationIDAndSearch(db *gorm.DB, organizationID uint64, search string, page, pageSize int) (ServersResponse, error) {
 	var (
 		servers []model.Server
 		total   int64
 	)
-	pp.Println(page, pageSize, organizationID)
 
-	if err := db.Model(&model.Server{}).Where("organization_id = ?", organizationID).Count(&total).Error; err != nil {
+	query := db.Model(&model.Server{}).Where("organization_id = ?", organizationID)
+	if search != "" {
+		query = query.Where("name LIKE ?", "%"+search+"%")
+	}
+
+	if err := query.Count(&total).Error; err != nil {
 		return ServersResponse{}, err
 	}
 
 	offset := (page - 1) * pageSize
-	if err := db.Where("organization_id = ?", organizationID).
-		Offset(offset).
-		Limit(pageSize).
-		Find(&servers).Error; err != nil {
+	if err := query.Offset(offset).Limit(pageSize).Find(&servers).Error; err != nil {
 		return ServersResponse{}, err
 	}
 

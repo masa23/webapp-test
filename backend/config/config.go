@@ -3,12 +3,19 @@ package config
 import (
 	"errors"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	JWTSecret string `yaml:"JWTSecret"`
+	AccessToken struct {
+		JWTSecret string        `yaml:"JWTSecret"`
+		Duration  time.Duration `yaml:"Duration"`
+	} `yaml:"AccessToken"`
+	RefreshToken struct {
+		Duration time.Duration `yaml:"Duration"`
+	} `yaml:"RefreshToken"`
 }
 
 func Load(path string) (*Config, error) {
@@ -22,8 +29,16 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if conf.JWTSecret == "" {
+	if conf.AccessToken.JWTSecret == "" {
 		return nil, errors.New("JWTSecret is required in the configuration file")
+	}
+
+	if conf.AccessToken.Duration < 1 {
+		conf.AccessToken.Duration = time.Minute
+	}
+
+	if conf.RefreshToken.Duration < 1 {
+		conf.RefreshToken.Duration = time.Hour * 24 * 7 // Default 7d
 	}
 
 	return &conf, nil

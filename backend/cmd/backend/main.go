@@ -93,7 +93,7 @@ func serverActionHandler(action func(model.Server) error, successMsg string) ech
 
 // ハンドラ群
 func loginHandler(c echo.Context) error {
-	return auth.Login(c, db)
+	return auth.Login(c, db, conf.RefreshToken.Duration)
 }
 
 func logoutHandler(c echo.Context) error {
@@ -101,7 +101,7 @@ func logoutHandler(c echo.Context) error {
 }
 
 func refreshHandler(c echo.Context) error {
-	return auth.Refresh(c, db, conf.JWTSecret)
+	return auth.Refresh(c, db, conf.AccessToken.JWTSecret, conf.AccessToken.Duration)
 }
 
 func helloWorldHandler(c echo.Context) error {
@@ -129,7 +129,9 @@ func getServersHandler(c echo.Context) error {
 	if pageSize < 1 {
 		pageSize = 10
 	}
-	resp, err := server.GetServersByOrganizationID(db, user.OrganizationID, page, pageSize)
+	search := c.QueryParam("search")
+
+	resp, err := server.GetServersByOrganizationIDAndSearch(db, user.OrganizationID, search, page, pageSize)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to retrieve servers")
 	}
@@ -194,7 +196,7 @@ func getServerVNCHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Token is required")
 	}
 
-	userId, err := auth.JWTTokenAuth(c, token, conf.JWTSecret)
+	userId, err := auth.JWTTokenAuth(c, token, conf.AccessToken.JWTSecret)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "Invalid token")
 	}
@@ -292,7 +294,7 @@ func main() {
 	api := e.Group("/api")
 	api.Use(echojwt.WithConfig(echojwt.Config{
 		NewClaimsFunc: auth.NewJWTClaims,
-		SigningKey:    []byte(conf.JWTSecret),
+		SigningKey:    []byte(conf.AccessToken.JWTSecret),
 	}))
 
 	api.GET("/profile", profileHandler)

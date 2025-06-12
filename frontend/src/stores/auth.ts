@@ -61,7 +61,6 @@ export const useAuth = defineStore('auth', () => {
       }
     } catch (error) {
       console.error('Failed to fetch profile', error)
-      logout()
     }
   }
 

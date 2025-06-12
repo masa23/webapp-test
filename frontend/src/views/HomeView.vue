@@ -23,7 +23,7 @@ interface ServerWithStatus extends Server {
 const servers = ref<ServerWithStatus[]>([])
 const totalCount = ref(0)
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(20)
 const loading = ref(true)
 
 // サーバー一覧取得
@@ -48,7 +48,9 @@ const fetchServers = async () => {
     )
     servers.value = withStatus
   } catch (err) {
-    handleAxiosError(err)
+    console.error('Error fetching servers:', err)
+    servers.value = []
+    totalCount.value = 0
   } finally {
     loading.value = false
   }
@@ -81,7 +83,7 @@ const postServerAction = async (id: number, action: string, confirmMsg: string, 
       }, 5000)
     }
   } catch (err) {
-    handleAxiosError(err)
+    console.error('Error performing action:', err)
   }
 }
 
@@ -91,16 +93,6 @@ const postServerPowerOn = (id: number) => postServerAction(id, 'power/on', '本�
 const postServerPowerReboot = (id: number) => postServerAction(id, 'power/reboot', '本当に再起動しますか？', true)
 const postServerPowerForceReboot = (id: number) => postServerAction(id, 'power/force-reboot', '本当に強制再起動しますか？', true)
 const postServerPowerForceOff = (id: number) => postServerAction(id, 'power/force-off', '本当に強制停止しますか？', true)
-
-// エラーハンドリング
-const handleAxiosError = (err: unknown) => {
-  if (axios.isAxiosError(err) && err.response?.status === 401) {
-    console.log('Unauthorized access, logging out...')
-    auth.logout()
-  } else {
-    console.error('API error:', err)
-  }
-}
 
 const openVNC = async (id: number) => {
   const url = `/noVNC/vnc.html?autoconnect=true&path=/ws/server/${id}/vnc?token=${await auth.getToken()}`
@@ -129,9 +121,8 @@ onMounted(() => fetchServers())
 <template>
   <div class="p-8 space-y-8">
     <div>
-      <h1 class="text-3xl font-bold text-gray-900">Server Dashboard</h1>
       <button @click="fetchServers"
-        class="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+        class="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 transition">
         🔄 Reload
       </button>
     </div>
@@ -158,22 +149,22 @@ onMounted(() => fetchServers())
               <td class="px-4 py-3 font-medium text-gray-900">{{ server.name }}</td>
               <td class="px-4 py-3 text-gray-500">{{ server.host_name }}</td>
               <td class="px-4 py-3">
-                <span class="px-2 py-1 rounded-full text-xs font-medium" :class="{
+                <span class="px-2 py-1 rounded-full text-xs font-medium border border-gray-200" :class="{
                   'bg-green-100 text-green-700': server.status === 'running',
-                  'bg-yellow-100 text-yellow-700': server.status === 'stopped',
-                  'bg-gray-200 text-gray-600': server.status === 'unknown',
+                  'bg-gray-100 text-gray-700': server.status === 'shut off',
+                  'bg-red-200 text-red-600': server.status === 'unknown',
                 }">
                   {{ server.status }}
                 </span>
               </td>
               <td class="px-4 py-3">
                 <div class="flex flex-wrap gap-2">
-                  <button @click="postServerPowerOn(server.id)" class="btn btn-green">On</button>
-                  <button @click="postServerPowerOff(server.id)" class="btn btn-yellow">Off</button>
-                  <button @click="postServerPowerReboot(server.id)" class="btn btn-blue">Reboot</button>
-                  <button @click="postServerPowerForceReboot(server.id)" class="btn btn-red">Force Reboot</button>
-                  <button @click="postServerPowerForceOff(server.id)" class="btn btn-dark">Force Off</button>
-                  <button @click="openVNC(server.id)" class="btn btn-light">VNC</button>
+                  <button @click="postServerPowerOn(server.id)" class="bg-blue-100 text-blue-700 rounded-md border border-gray-200 p-1 hover:bg-blue-200">起動</button>
+                  <button @click="postServerPowerOff(server.id)" class="bg-red-100 text-red-700 rounded-md border border-gray-200 p-1 hover:bg-red-200">停止</button>
+                  <button @click="postServerPowerReboot(server.id)" class="bg-orange-100 text-orange-700 rounded-md border border-gray-200 p-1 hover:bg-orange-200">再起動</button>
+                  <button @click="postServerPowerForceReboot(server.id)" class="bg-orange-200 text-orange-800 rounded-md border border-gray-200 p-1 hover:bg-orange-300">強制再起動</button>
+                  <button @click="postServerPowerForceOff(server.id)" class="bg-gray-800 text-white rounded-md border border-gray-300 p-1 hover:bg-gray-700">強制停止</button>
+                  <button @click="openVNC(server.id)" class="bg-purple-100 text-purple-700 rounded-md border border-gray-200 p-1 hover:bg-purple-200">VNC</button>
                 </div>
               </td>
             </tr>
@@ -182,11 +173,11 @@ onMounted(() => fetchServers())
 
         <!-- ページネーション -->
         <div class="flex justify-center items-center mt-6 gap-4">
-          <button @click="previousPage" :disabled="page === 1" class="btn btn-light">
+          <button @click="previousPage" :disabled="page === 1" class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
             ⬅ Prev
           </button>
           <span class="text-sm text-gray-600">Page {{ page }}</span>
-          <button @click="nextPage" :disabled="page * pageSize >= totalCount" class="btn btn-light">
+          <button @click="nextPage" :disabled="page * pageSize >= totalCount" class="border border-gray-200 p-1 rounded-md disabled:opacity-50">
             Next ➡
           </button>
         </div>
@@ -195,5 +186,5 @@ onMounted(() => fetchServers())
   </div>
 </template>
 
-<style lang="postcss" scoped>
+<style>
 </style>

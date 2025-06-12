@@ -196,31 +196,4 @@ onMounted(() => fetchServers())
 </template>
 
 <style lang="postcss" scoped>
-.btn {
-  @apply px-3 py-1 text-sm rounded font-medium transition;
-}
-
-.btn-green {
-  @apply bg-green-600 text-white hover:bg-green-700;
-}
-
-.btn-yellow {
-  @apply bg-yellow-500 text-white hover:bg-yellow-600;
-}
-
-.btn-blue {
-  @apply bg-blue-600 text-white hover:bg-blue-700;
-}
-
-.btn-red {
-  @apply bg-red-500 text-white hover:bg-red-600;
-}
-
-.btn-dark {
-  @apply bg-gray-700 text-white hover:bg-gray-800;
-}
-
-.btn-light {
-  @apply bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50;
-}
 </style>

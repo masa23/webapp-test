@@ -22,26 +22,16 @@ auth.getToken().then(token => {
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-gray-100 text-gray-800">
-    <div class="w-full max-w-[900px] flex bg-white shadow-lg rounded-lg overflow-hidden mt-8">
-      <aside class="w-64 bg-white shadow flex-shrink-0">
-        <div class="p-6 text-2xl font-bold border-b">VM Manager</div>
-        <nav class="p-4 flex flex-col gap-3">
-          <RouterLink to="/" class="hover:text-blue-600">Dashboard</RouterLink>
-          <RouterLink v-if="!isLoggedIn" to="/login" class="text-blue-600 hover:underline">
-            Login
-          </RouterLink>
-          <a v-if="isLoggedIn" @click.prevent="logout" class="text-left text-red-600 hover:underline">
-            Logout
-          </a>
-        </nav>
-      </aside>
-
-      <div class="flex-1 flex flex-col">
-        <main class="flex-1 p-6">
-          <RouterView />
-        </main>
-      </div>
-    </div>
-  </div>
+  <!-- Header -->
+  <header class="bg-gray-100 shadow p-4 flex items-center justify-between max-w-[900px]">
+    <h1 class="bg-gray-100 text-2xl font-bold text-gray-800">VM Manager</h1>
+    <nav class="space-x-4">
+      <RouterLink to="/" class="text-gray-600 hover:text-gray-900">Home</RouterLink>
+      <RouterLink to="/api" class="text-gray-600 hover:text-gray-900">API</RouterLink>
+      <RouterLink to="/login" class="ml-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">ログイン</RouterLink>
+    </nav>
+  </header>
+  <main class="max-w-[900px]">
+    <RouterView />
+  </main>
 </template>

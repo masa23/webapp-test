@@ -10,7 +10,7 @@ func Migrate(db *gorm.DB) error {
 	// マイグレーションを実行
 	return db.AutoMigrate(
 		&User{},
-		&APIToken{},
+		//&APIToken{},
 		&Organization{},
 		&Server{},
 		&RefreshToken{},
@@ -28,17 +28,19 @@ type Model struct {
 
 type User struct {
 	Model
-	Username       string  `gorm:"size:64;uniqueIndex;not null" json:"username"` // ユーザ名
-	Password       string  `gorm:"size:64;not null" json:"password"`             // パスワード
-	APITokenID     *uint64 `json:"api_token_id"`                                 // APIキーID
-	OrganizationID uint64  `gorm:"not null; index" json:"organization_id"`       // 組織ID
+	Username string `gorm:"size:64;uniqueIndex;not null" json:"username"` // ユーザ名
+	Password string `gorm:"size:64;not null" json:"password"`             // パスワード
+	//APITokenID     *uint64 `json:"api_token_id"`                                 // APIキーID
+	OrganizationID uint64 `gorm:"not null; index" json:"organization_id"` // 組織ID
 }
 
+/*
 type APIToken struct {
 	Model
 	AccessToken string `gorm:"size:64;not null; index" json:"access_token"` // アクセストークン
 	SecretToken string `gorm:"size:72;not null" json:"secret_token"`        // シークレットトークン
 }
+*/
 
 type Organization struct {
 	Model

@@ -17,12 +17,12 @@ const router = createRouter({
       name: 'login',
       component: LoginView,
     },
-    {
+    /*{
       path: '/apikey',
       name: 'apikey',
       component: HomeView,
       meta: { requiresAuth: true },
-    },
+    },*/
   ],
 })
 

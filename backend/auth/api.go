@@ -1,14 +1,6 @@
 package auth
 
-import (
-	"strings"
-
-	"github.com/labstack/echo/v4"
-	"github.com/masa23/webapp-test/model"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
-)
-
+/*
 const (
 	MinAccessTokenLength = 64
 	MinSecretTokenLength = 72
@@ -64,3 +56,4 @@ func parseAPIKeyHeader(c echo.Context) (string, string, error) {
 	}
 	return tokens[0], tokens[1], nil
 }
+*/

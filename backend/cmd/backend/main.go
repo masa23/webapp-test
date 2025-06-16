@@ -104,10 +104,6 @@ func refreshHandler(c echo.Context) error {
 	return auth.Refresh(c, db, conf.AccessToken.JWTSecret, conf.AccessToken.Duration)
 }
 
-func helloWorldHandler(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"message": "Hello, World!"})
-}
-
 func profileHandler(c echo.Context) error {
 	user, err := authenticatedUser(c)
 	if err != nil {
@@ -288,7 +284,6 @@ func main() {
 	e.POST("/auth/login", loginHandler)
 	e.GET("/auth/refresh", refreshHandler)
 	e.POST("/auth/logout", logoutHandler)
-	e.GET("/", helloWorldHandler)
 	e.GET("/ws/server/:id/vnc", getServerVNCHandler)
 
 	api := e.Group("/api")
